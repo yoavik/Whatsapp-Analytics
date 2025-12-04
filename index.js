@@ -1,5 +1,5 @@
-import { create } from "@wppconnect-team/wppconnect";
-import fetch from "node-fetch";
+const wppconnect = require("@wppconnect-team/wppconnect");
+const fetch = require("node-fetch");
 
 // שליחת נתונים ל-Google Sheets
 async function sendToSheets(row) {
@@ -14,37 +14,38 @@ async function sendToSheets(row) {
   }
 }
 
-// נורמליזציה של שם שולח
+// חילוץ שולח
 function extractSender(message) {
-  // לפעמים יש sender תקין:
-  if (message.sender?.pushname) return message.sender.pushname;
-  if (message.sender?.shortName) return message.sender.shortName;
-  if (message.sender?.id) return message.sender.id;
+  if (message.sender && message.sender.pushname) return message.sender.pushname;
+  if (message.sender && message.sender.shortName) return message.sender.shortName;
+  if (message.sender && message.sender.id) return message.sender.id;
 
-  // לפעמים המידע נמצא במקום אחר:
   if (message.author) return message.author;
-  if (message.chat?.contact?.pushname) return message.chat.contact.pushname;
-  if (message.chat?.id?.user) return message.chat.id.user;
+  if (message.chat && message.chat.contact && message.chat.contact.pushname)
+    return message.chat.contact.pushname;
+  if (message.chat && message.chat.id && message.chat.id.user)
+    return message.chat.id.user;
 
-  // במקרים נדירים — כלום:
   return "Unknown";
 }
 
-create({
-  session: "monitor-session",
-  headless: true,
-  tokenStore: "file",
-  tokenStoreDir: "./tokens",
-  browserArgs: [
-    "--no-sandbox",
-    "--disable-setuid-sandbox",
-    "--disable-gpu",
-    "--disable-dev-shm-usage",
-    "--disable-extensions",
-    "--single-process",
-    "--no-zygote",
-  ],
-})
+wppconnect
+  .create({
+    session: "monitor-session",
+    headless: true,
+    tokenStore: "file",
+    tokenStoreDir: "./tokens",
+
+    browserArgs: [
+      "--no-sandbox",
+      "--disable-setuid-sandbox",
+      "--disable-gpu",
+      "--disable-dev-shm-usage",
+      "--disable-extensions",
+      "--single-process",
+      "--no-zygote",
+    ],
+  })
   .then((client) => start(client))
   .catch((error) => console.error("WPPConnect init error:", error));
 
@@ -53,29 +54,24 @@ async function start(client) {
 
   client.onMessage(async (message) => {
     try {
-      // סינון — רק הודעות בקבוצה
+      // רק בקבוצות
       if (!message.from.endsWith("@g.us")) return;
 
-      // סינון — רק הקבוצה שלך
+      // רק הקבוצה שלך
       if (message.from !== process.env.TARGET_GROUP_ID) return;
 
-      // סינון — הודעות מערכת לא רלוונטיות
+      // התעלם מהודעות מערכת
       if (message.isNotification) return;
 
-      // חילוץ שולח
       const sender = extractSender(message);
-
-      // טקסט — גם אם אין body
       const text = message.body || "";
 
-      const row = {
+      await sendToSheets({
         timestamp: new Date().toISOString(),
         sender: sender,
         text: text,
         messageId: message.id || "",
-      };
-
-      await sendToSheets(row);
+      });
 
       console.log("Message exported:", sender, "→", text);
     } catch (err) {
@@ -83,7 +79,6 @@ async function start(client) {
     }
   });
 
-  // טיפול בניתוק
   client.onStateChange((state) => {
     console.log("State changed:", state);
     if (state === "CONFLICT" || state === "UNLAUNCHED" || state === "UNPAIRED") {
