@@ -1,6 +1,6 @@
 FROM node:18-slim
 
-# Install required libraries for Chromium
+# Install dependencies required for Chromium
 RUN apt-get update && apt-get install -y \
   wget \
   gnupg \
@@ -27,6 +27,8 @@ RUN apt-get update && apt-get install -y \
   libxrender1 \
   libxshmfence1 \
   libxtst6 \
+  libxkbcommon0 \
+  libxkbcommon-x11-0 \
   xdg-utils \
   --no-install-recommends && \
   rm -rf /var/lib/apt/lists/*
