@@ -29,6 +29,13 @@ RUN apt-get update && apt-get install -y \
   libxtst6 \
   libxkbcommon0 \
   libxkbcommon-x11-0 \
+  libcairo2 \
+  libpango-1.0-0 \
+  libpangocairo-1.0-0 \
+  libatk-bridge2.0-0 \
+  libatspi2.0-0 \
+  libharfbuzz0b \
+  libjpeg62-turbo \
   xdg-utils \
   --no-install-recommends && \
   rm -rf /var/lib/apt/lists/*
