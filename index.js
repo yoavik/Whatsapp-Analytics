@@ -6,6 +6,9 @@ const WEBHOOK_URL = process.env.WEBHOOK_URL;
 wppconnect
   .create({
     session: 'monitor-session',
+    autoClose: false,              // ⬅ ביטול Auto-close
+    qrTimeout: 0,                  // ⬅ QR לא יפוג
+    authTimeout: 0,                // ⬅ לא מייצר timeout
     puppeteerOptions: {
       headless: true,
       args: [
@@ -22,7 +25,7 @@ wppconnect
         '--disable-breakpad',
         '--disable-default-apps',
         '--disable-features=TranslateUI',
-        '--mute-audio',
+        '--mute-audio'
       ]
     }
   })
