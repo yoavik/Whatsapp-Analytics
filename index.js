@@ -1,16 +1,16 @@
-// index.js – גרסת CommonJS יציבה ל-Render
+// index.js — גרסת CommonJS מלאה ויציבה ל-Render
 
 const wppconnect = require("@wppconnect-team/wppconnect");
 
-// שליחת נתונים ל-Google Sheets דרך fetch המובנה של Node 18
+// שליחת נתונים ל-Google Sheets
 async function sendToSheets(row) {
-  try {
-    const url = process.env.SHEETS_WEBHOOK_URL;
-    if (!url) {
-      console.error("SHEETS_WEBHOOK_URL is not set");
-      return;
-    }
+  const url = process.env.SHEETS_WEBHOOK_URL;
+  if (!url) {
+    console.error("❌ SHEETS_WEBHOOK_URL is not set");
+    return;
+  }
 
+  try {
     const res = await fetch(url, {
       method: "POST",
       headers: { "Content-Type": "application/json" },
@@ -18,24 +18,19 @@ async function sendToSheets(row) {
     });
 
     if (!res.ok) {
-      console.error("Sheets webhook HTTP error:", res.status, await res.text());
+      console.error("❌ Sheets error:", res.status, await res.text());
     }
   } catch (err) {
-    console.error("Error sending to Sheets:", err);
+    console.error("❌ Error sending to Sheets:", err);
   }
 }
 
-// חילוץ שם/ID שולח בצורה סלחנית
+// חילוץ שם שולח בצורה סלחנית
 function extractSender(message) {
-  if (message.sender && message.sender.pushname) return message.sender.pushname;
-  if (message.sender && message.sender.shortName) return message.sender.shortName;
-  if (message.sender && message.sender.id) return message.sender.id;
-
+  if (message.sender?.pushname) return message.sender.pushname;
+  if (message.sender?.shortName) return message.sender.shortName;
+  if (message.sender?.id) return message.sender.id;
   if (message.author) return message.author;
-  if (message.chat && message.chat.contact && message.chat.contact.pushname)
-    return message.chat.contact.pushname;
-  if (message.chat && message.chat.id && message.chat.id.user)
-    return message.chat.id.user;
 
   return "Unknown";
 }
@@ -45,7 +40,8 @@ wppconnect
     session: "monitor-session",
     headless: true,
     tokenStore: "file",
-    tokenStoreDir: "./tokens", // ממופה לדיסק ב-/app/tokens
+    tokenStoreDir: "./tokens",
+
     browserArgs: [
       "--no-sandbox",
       "--disable-setuid-sandbox",
@@ -56,42 +52,64 @@ wppconnect
       "--no-zygote",
     ],
   })
-  .then((client) => start(client))
-  .catch((error) => console.error("WPPConnect init error:", error));
+  .then(start)
+  .catch((error) => console.error("❌ WPPConnect init error:", error));
 
 function start(client) {
-  console.log("WhatsApp connected!");
+  console.log("✅ WhatsApp connected!");
 
+  let targetGroup = process.env.TARGET_GROUP_ID;
+
+  if (!targetGroup) {
+    console.log("⚠️ TARGET_GROUP_ID not set — detecting automatically…");
+  }
+
+  // ========== קבלת הודעות ==========
   client.onMessage(async (message) => {
     try {
       // רק הודעות מקבוצות
       if (!message.from.endsWith("@g.us")) return;
 
-      // רק הקבוצה שלך
-      if (message.from !== process.env.TARGET_GROUP_ID) return;
+      // אם עדיין אין TARGET_GROUP_ID – זיהוי אוטומטי
+      if (!targetGroup) {
+        console.log("\n🎯 DETECTED GROUP ID:", message.from);
+        console.log("👉 העתק את זה ל־TARGET_GROUP_ID ב־Render:");
+        console.log(message.from, "\n");
 
-      // התעלם מהודעות מערכת
+        targetGroup = message.from;
+      }
+
+      // רק הקבוצה הספציפית
+      if (message.from !== targetGroup) return;
+
+      // התעלמות מהודעות מערכת
       if (message.isNotification) return;
 
       const sender = extractSender(message);
       const text = message.body || "";
+      const messageId = message.id || "";
+
+      console.log("📨 Message:", { sender, text });
 
       await sendToSheets({
         timestamp: new Date().toISOString(),
+        groupId: targetGroup,
         sender,
         text,
-        messageId: message.id || "",
+        messageId,
       });
 
-      console.log("Message exported:", sender, "→", text);
+      console.log("✅ Exported to Sheets");
     } catch (err) {
-      console.error("Message handler error:", err);
+      console.error("❌ Message handler error:", err);
     }
   });
 
+  // ========== ניטור מצבים ==========
   client.onStateChange((state) => {
-    console.log("State changed:", state);
-    if (state === "CONFLICT" || state === "UNLAUNCHED" || state === "UNPAIRED") {
+    console.log("📡 State changed:", state);
+    if (["CONFLICT", "UNLAUNCHED", "UNPAIRED"].includes(state)) {
+      console.log("🔄 Forcing refocus…");
       client.forceRefocus();
     }
   });
