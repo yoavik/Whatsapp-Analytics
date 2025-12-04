@@ -1,111 +1,93 @@
-// =======================
-// Whatsapp Monitoring Bot
-// Render + WPPConnect
-// =======================
+import { create } from "@wppconnect-team/wppconnect";
+import fetch from "node-fetch";
 
-const fs = require('fs');
-const path = require('path');
-const wppconnect = require('@wppconnect-team/wppconnect');
-const axios = require('axios');
-
-// ========== CONFIG ==========
-const WEBHOOK_URL = process.env.WEBHOOK_URL;
-const SESSION_DIR = '/app/tokens/monitor-session';
-const CHROME_PROFILE = path.join(SESSION_DIR, 'Default');
-
-// =====================================
-// 1. CLEAN SINGLETON LOCK FILES
-// (prevents Chrome error 21 / locked profile)
-// =====================================
-function cleanupLocks() {
-  const lockFiles = [
-    'SingletonLock',
-    'SingletonCookie',
-    'SingletonSocket',
-    'SSLError Log',
-    'Lockfile'
-  ];
-
-  lockFiles.forEach((file) => {
-    const fullPath = path.join(CHROME_PROFILE, file);
-    try {
-      if (fs.existsSync(fullPath)) {
-        fs.unlinkSync(fullPath);
-        console.log("[CLEANUP] Removed lock:", file);
-      }
-    } catch (err) {
-      console.log("[CLEANUP] Failed to remove:", file);
-    }
-  });
+// שליחת נתונים ל-Google Sheets
+async function sendToSheets(row) {
+  try {
+    await fetch(process.env.SHEETS_WEBHOOK_URL, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify(row),
+    });
+  } catch (err) {
+    console.error("Error sending to Sheets:", err);
+  }
 }
 
-// Ensure directory exists
-try {
-  fs.mkdirSync(CHROME_PROFILE, { recursive: true });
-} catch {}
+// נורמליזציה של שם שולח
+function extractSender(message) {
+  // לפעמים יש sender תקין:
+  if (message.sender?.pushname) return message.sender.pushname;
+  if (message.sender?.shortName) return message.sender.shortName;
+  if (message.sender?.id) return message.sender.id;
 
-cleanupLocks();
+  // לפעמים המידע נמצא במקום אחר:
+  if (message.author) return message.author;
+  if (message.chat?.contact?.pushname) return message.chat.contact.pushname;
+  if (message.chat?.id?.user) return message.chat.id.user;
 
-// =====================================
-// 2. START WPPCONNECT CLIENT
-// =====================================
-wppconnect
-  .create({
-    session: 'monitor-session',
-    folderNameToken: '/app/tokens',
-    deviceName: 'Render Whatsapp Worker',
-    autoClose: false,                   // keep browser alive
-    authTimeout: 0,                     // no auth timeout
-    qrTimeout: 0,                       // QR never expires
-    puppeteerOptions: {
-      headless: true,
-      userDataDir: SESSION_DIR,         // persistent session
-      args: [
-        '--no-sandbox',
-        '--disable-setuid-sandbox',
-        '--disable-gpu',
-        '--disable-dev-shm-usage',
-        '--disable-extensions',
-        '--disable-background-networking',
-        '--disable-background-timer-throttling',
-        '--disable-breakpad',
-        '--disable-default-apps',
-        '--disable-sync',
-        '--disable-translate',
-        '--disable-features=TranslateUI',
-        '--single-process',
-        '--no-zygote',
-        '--ignore-certificate-errors',
-        '--mute-audio'
-      ]
-    }
-  })
+  // במקרים נדירים — כלום:
+  return "Unknown";
+}
 
+create({
+  session: "monitor-session",
+  headless: true,
+  tokenStore: "file",
+  tokenStoreDir: "./tokens",
+  browserArgs: [
+    "--no-sandbox",
+    "--disable-setuid-sandbox",
+    "--disable-gpu",
+    "--disable-dev-shm-usage",
+    "--disable-extensions",
+    "--single-process",
+    "--no-zygote",
+  ],
+})
   .then((client) => start(client))
   .catch((error) => console.error("WPPConnect init error:", error));
 
+async function start(client) {
+  console.log("WhatsApp connected!");
 
-// =====================================
-// 3. HANDLE INCOMING WHATSAPP MESSAGES
-// =====================================
-function start(client) {
-  console.log("📡 Whatsapp worker started.");
-
-  client.onMessage(async (msg) => {
+  client.onMessage(async (message) => {
     try {
-      if (!msg.isGroupMsg) return; // only track group messages
+      // סינון — רק הודעות בקבוצה
+      if (!message.from.endsWith("@g.us")) return;
 
-      await axios.post(WEBHOOK_URL, {
-        sender: msg.sender?.pushname || msg.sender?.id || "",
-        message: msg.body || "",
-        chatId: msg.chat.id,
-        timestamp: Date.now()
-      });
+      // סינון — רק הקבוצה שלך
+      if (message.from !== process.env.TARGET_GROUP_ID) return;
 
-      console.log("✔ Sent to webhook:", msg.body);
+      // סינון — הודעות מערכת לא רלוונטיות
+      if (message.isNotification) return;
 
+      // חילוץ שולח
+      const sender = extractSender(message);
+
+      // טקסט — גם אם אין body
+      const text = message.body || "";
+
+      const row = {
+        timestamp: new Date().toISOString(),
+        sender: sender,
+        text: text,
+        messageId: message.id || "",
+      };
+
+      await sendToSheets(row);
+
+      console.log("Message exported:", sender, "→", text);
     } catch (err) {
-      console.error("Webhook Error:", err.message);
+      console.error("Message handler error:", err);
+    }
+  });
+
+  // טיפול בניתוק
+  client.onStateChange((state) => {
+    console.log("State changed:", state);
+    if (state === "CONFLICT" || state === "UNLAUNCHED" || state === "UNPAIRED") {
+      client.forceRefocus();
     }
   });
 }
