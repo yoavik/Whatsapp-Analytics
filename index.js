@@ -1,20 +1,31 @@
-const wppconnect = require("@wppconnect-team/wppconnect");
-const fetch = require("node-fetch");
+// index.js – גרסת CommonJS יציבה ל-Render
 
-// שליחת נתונים ל-Google Sheets
+const wppconnect = require("@wppconnect-team/wppconnect");
+
+// שליחת נתונים ל-Google Sheets דרך fetch המובנה של Node 18
 async function sendToSheets(row) {
   try {
-    await fetch(process.env.SHEETS_WEBHOOK_URL, {
+    const url = process.env.SHEETS_WEBHOOK_URL;
+    if (!url) {
+      console.error("SHEETS_WEBHOOK_URL is not set");
+      return;
+    }
+
+    const res = await fetch(url, {
       method: "POST",
       headers: { "Content-Type": "application/json" },
       body: JSON.stringify(row),
     });
+
+    if (!res.ok) {
+      console.error("Sheets webhook HTTP error:", res.status, await res.text());
+    }
   } catch (err) {
     console.error("Error sending to Sheets:", err);
   }
 }
 
-// חילוץ שולח
+// חילוץ שם/ID שולח בצורה סלחנית
 function extractSender(message) {
   if (message.sender && message.sender.pushname) return message.sender.pushname;
   if (message.sender && message.sender.shortName) return message.sender.shortName;
@@ -34,8 +45,7 @@ wppconnect
     session: "monitor-session",
     headless: true,
     tokenStore: "file",
-    tokenStoreDir: "./tokens",
-
+    tokenStoreDir: "./tokens", // ממופה לדיסק ב-/app/tokens
     browserArgs: [
       "--no-sandbox",
       "--disable-setuid-sandbox",
@@ -49,12 +59,12 @@ wppconnect
   .then((client) => start(client))
   .catch((error) => console.error("WPPConnect init error:", error));
 
-async function start(client) {
+function start(client) {
   console.log("WhatsApp connected!");
 
   client.onMessage(async (message) => {
     try {
-      // רק בקבוצות
+      // רק הודעות מקבוצות
       if (!message.from.endsWith("@g.us")) return;
 
       // רק הקבוצה שלך
@@ -68,8 +78,8 @@ async function start(client) {
 
       await sendToSheets({
         timestamp: new Date().toISOString(),
-        sender: sender,
-        text: text,
+        sender,
+        text,
         messageId: message.id || "",
       });
 
